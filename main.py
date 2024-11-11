@@ -2,48 +2,88 @@ import os
 import sys
 import shutil
 from datetime import datetime
-import readline
-import glob
+import curses
 
 def main():
-    setup_autocomplete()
+    curses.wrapper(run_cli)
+
+def run_cli(stdscr):
+    curses.curs_set(1)
+    stdscr.clear()
+    stdscr.clear()
     while True:
         try:
             current_dir = os.getcwd()
-            command_prompt = input(f"{current_dir}> ").strip()
+            input_prompt = f"{current_dir}> "
+            stdscr.addstr(input_prompt)
+            stdscr.refresh()
+            command_prompt = ""
 
-            if not command_prompt:
-                continue
-
-            parts = command_prompt.split(" ")
-            command = parts[0]
-            args = parts[1:]
-
-            if command == 'cd':
-                change_directory(args)
-            elif command == 'ls':
-                list_directory(args)
-            elif command == 'touch':
-                create_file(args)
-            elif command == 'mv':
-                move_item(args)
-            elif command == 'rm':
-                remove_file(args)
-            elif command == 'rmdir':
-                remove_directory(args)
-            elif command in ['exit', 'quit']:
-                print("\nExiting CLI.")
-                break
-            elif command == "clear":
-                clear_terminal()
-            else:
-                print(f"Command not found: {command}")
+            while True:
+                ch = stdscr.get_wch()
+                if ch == '\t':
+                    command_parts = command_prompt.split(" ")
+                    if len(command_parts) > 1:
+                        last_arg = command_parts[-1]
+                        matches = autocomplete(current_dir, last_arg)
+                        matches = autocomplete(current_dir, last_arg)
+                        if matches:
+                            stdscr.addstr("\nPossible matches:\n" + "  ".join(matches) + "\n")
+                        else:
+                            stdscr.addstr("\nNo matches found.\n")
+                        stdscr.addstr(input_prompt + command_prompt)
+                        stdscr.refresh()
+                elif ch in ('\n', '\r'):
+                    stdscr.addstr("\n")
+                    break
+                elif isinstance(ch, str) and ch.isprintable():
+                    command_prompt += ch
+                    stdscr.addstr(ch)
+                    stdscr.refresh()
+                elif ch in [curses.KEY_BACKSPACE, '\b', '\x7f']:
+                    if len(command_prompt) > 0:
+                        command_prompt = command_prompt[:-1]
+                        y, x = stdscr.getyx()
+                        if x > len(input_prompt):
+                            stdscr.move(y, x - 1)
+                            stdscr.delch()
+                            stdscr.refresh()
+                else:
+                    pass
+            process_command(command_prompt.strip())
         except KeyboardInterrupt:
-            print("\nExiting CLI.")
+            stdscr.addstr("\nExiting CLI.")
+            stdscr.refresh()
             break
         except Exception as e:
-            print("Error:", e)
-            continue
+            stdscr.addstr(f"\nError: {e}")
+            stdscr.refresh()
+
+
+def process_command(command_prompt):
+    parts = command_prompt.split(" ")
+    command = parts[0]
+    args = parts[1:]
+
+    if command == 'cd':
+        change_directory(args)
+    elif command == 'ls':
+        list_directory(args)
+    elif command == 'touch':
+        create_file(args)
+    elif command == 'mv':
+        move_item(args)
+    elif command == 'rm':
+        remove_file(args)
+    elif command == 'rmdir':
+        remove_directory(args)
+    elif command in ['exit', 'quit']:
+        print("\nExiting CLI.")
+        sys.exit(0)
+    elif command == "clear":
+        clear_terminal()
+    else:
+        print(f"Command not found: {command}")
 
 def change_directory(args):
     if len(args) == 0 or args[0] == "~" or args[0] == "":
@@ -79,7 +119,7 @@ def list_directory(args):
                 mtime = datetime.fromtimestamp(stats.st_mtime).strftime('%Y-%m-%d %H:%M')
                 file_details.append((item, size, mtime))
             except Exception as e:
-                print(f"Error getting details for {item}: {e}")
+                print(f"\nError getting details for {item}: {e}")
 
         name_width = max((len(name) for name, _, _ in file_details), default=4)
         size_width = max((len(str(size)) for _, size, _ in file_details), default=4)
@@ -95,15 +135,15 @@ def list_directory(args):
 
 
     except FileNotFoundError:
-        print(f"No such directory: {path}")
+        print(f"\nNo such directory: {path}")
     except NotADirectoryError:
-        print(f"Not a directory: {path}")
+        print(f"\nNot a directory: {path}")
     except PermissionError:
-        print(f"Permission denied: {path}")
+        print(f"\nPermission denied: {path}")
 
 def create_file(args):
     if len(args) != 1:
-        print("Usage: touch <filename>")
+        print("\nUsage: touch <filename>")
         return
     
     file_path = args[0]
@@ -158,49 +198,15 @@ def remove_directory(args):
     except PermissionError:
         print(f"Permission denied: {dir_path}")
 
-def setup_autocomplete():
-    readline.set_completer(autocomplete)
-    readline.parse_and_bind("tab: complete")
-    readline.set_completer_delims("\t\n;")
-
-def autocomplete(text, state):
-    input = readline.get_line_buffer()
-    input_parts = input.strip().split()
+def autocomplete(curr_dir, arg):
+    return ['hello', 'there']
     
-    if not input_parts or (len(input_parts) == 1 and not input.endswith(' ')):
-        return None
-    else:   
-        expanded_text = os.path.expanduser(os.path.expandvars(text))
-        directory, partial_filename = os.path.split(expanded_text)
-        if not directory:
-            directory = "."
-        try:
-            directory_contents = os.listdir(directory)
-        except (FileNotFoundError, PermissionError):
-            return None
-
-        matches = []
-        for entry in directory_contents:
-            if entry.startswith(partial_filename):
-                full_path = os.path.join(directory, entry)
-                if os.path.isdir(full_path):
-                    match = os.path.join(directory, entry) + '/'
-                else:
-                    match = os.path.join(directory, entry)
-                matches.append(match)
-        formatted_matches = [os.path.relpath(match, start=os.getcwd()) for match in matches]
-        if state < len(formatted_matches):
-            return formatted_matches[state]
-        else:
-            return None
 
 def clear_terminal():
     try:
         os.system("clear")
     except Exception as e:
         print("Error clearing terminal: ", e)
-
-
 
 if __name__ == "__main__":
     main()
